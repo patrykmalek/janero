@@ -6,6 +6,7 @@ import asyncio
 import websockets
 import sys
 from blockchain import Blockchain, Transaction, Block
+import aioconsole
 
 # Inicjalizacja Blockchain
 blockchain = None  # Nie inicjalizujemy blockchaina na starcie
@@ -102,17 +103,6 @@ async def send_to_server(payload):
         try:
             print("[INFO] Wysyłanie danych do serwera...")
             await websocket.send(json.dumps(payload))
-            print("[INFO] Oczekiwanie na odpowiedź...")
-            response = await websocket.recv()
-            print("[INFO] Otrzymano odpowiedź od serwera")
-            payload = json.loads(response)
-            if payload['type'] == 'chain':
-                if not blockchain:  # Tworzymy blockchain tylko jeśli go nie ma
-                    blockchain = Blockchain()
-                new_chain = [Block.from_dict(b) for b in payload['data']]
-                blockchain.replace_chain(new_chain)
-                update_balances()  # Aktualizuj balanse po otrzymaniu nowego łańcucha
-            return True
         except websockets.exceptions.ConnectionClosed:
             print("[ERROR] Połączenie zostało zamknięte podczas wysyłania danych")
             websocket = None
@@ -169,31 +159,34 @@ async def listen_for_updates():
     global websocket, blockchain
     while True:
         try:
-            async with connection_lock:
-                if not websocket:
+            if not websocket:
+                async with connection_lock:
                     if not await connect_to_server():
                         await asyncio.sleep(5)
                         continue
-                
-                try:
-                    message = await websocket.recv()
-                    print("[INFO] Otrzymano wiadomość od serwera")
-                    payload = json.loads(message)
-                    if payload['type'] == 'chain':
+
+            try:
+                message = await websocket.recv()  # NIE blokujemy locka w tym miejscu
+                print("[INFO] Otrzymano wiadomość od serwera")
+                payload = json.loads(message)
+
+                if payload['type'] == 'chain':
+                    async with connection_lock:  # tylko operacje na blockchain
                         if not blockchain:
                             blockchain = Blockchain()
                         new_chain = [Block.from_dict(b) for b in payload['data']]
                         blockchain.replace_chain(new_chain)
                         update_balances()
                         print("[INFO] Zaktualizowano blockchain z serwera")
-                except websockets.exceptions.ConnectionClosed:
-                    print("[ERROR] Połączenie zostało zamknięte podczas nasłuchiwania")
+            except websockets.exceptions.ConnectionClosed:
+                print("[ERROR] Połączenie zostało zamknięte podczas nasłuchiwania")
+                async with connection_lock:
                     websocket = None
-                except Exception as e:
-                    print(f"[ERROR] Błąd podczas nasłuchiwania: {e}")
+            except Exception as e:
+                print(f"[ERROR] Błąd podczas nasłuchiwania: {e}")
         except Exception as e:
             print(f"[ERROR] Błąd w listen_for_updates: {e}")
-            await asyncio.sleep(5)
+        await asyncio.sleep(1)
 
 async def menu():
     global blockchain
@@ -203,7 +196,7 @@ async def menu():
         return
     
     # Uruchom keep_alive i listen_for_updates w tle
-    asyncio.create_task(keep_alive())
+    #asyncio.create_task(keep_alive())
     asyncio.create_task(listen_for_updates())
     
     while True:
@@ -220,7 +213,7 @@ async def menu():
         print("4. Wydobądź blok")
         print("5. Zobacz blockchain")
         print("6. Wyjście")
-        choice = input("> ")
+        choice = await aioconsole.ainput("> ")
 
         if choice == "1":
             addr, priv = create_wallet()
@@ -230,15 +223,15 @@ async def menu():
                 print("Klucz prywatny:", priv)
 
         elif choice == "2":
-            addr = input("Podaj adres: ")
+            addr = await aioconsole.ainput("Podaj adres: ")
             balance = blockchain.balances.get(addr, 0)
             print(f"\n[INFO] Balans dla adresu {addr}: {balance}")
 
         elif choice == "3":
-            sender = input("Nadawca (adres): ")
-            recipient = input("Odbiorca (adres): ")
+            sender = await aioconsole.ainput("Nadawca (adres): ")
+            recipient = await aioconsole.ainput("Odbiorca (adres): ")
             try:
-                amount = float(input("Kwota: "))
+                amount = float(await aioconsole.ainput("Kwota: "))
                 if amount <= 0:
                     print("[ERROR] Kwota musi być większa od 0")
                     continue
@@ -263,7 +256,7 @@ async def menu():
                 print("[ERROR] Nieprawidłowa kwota")
 
         elif choice == "4":
-            miner = input("Adres górnika (adres): ")
+            miner = await aioconsole.ainput("Adres górnika (adres): ")
             if miner not in blockchain.public_keys:
                 print("[ERROR] Brak klucza publicznego górnika")
                 continue
