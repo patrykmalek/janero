@@ -61,7 +61,6 @@ class Blockchain:
     def __init__(self):
         self.chain = []
         self.pending_transactions = []
-        self.create_genesis_block()
         self.balances = {}
         self.public_keys = {}
 

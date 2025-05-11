@@ -22,7 +22,7 @@ def initialize_blockchain():
             previous_hash="0" * 64,
             nonce=0
         )
-        genesis_block.hash = genesis_block.calculate_hash()
+        genesis_block.hash = genesis_block.compute_hash()
         blockchain.chain.append(genesis_block)
         print("[INFO] Utworzono blok genesis")
         update_balances()
