@@ -52,36 +52,34 @@ def update_balances():
             else:
                 blockchain.balances[tx_data['recipient']] = tx_data['amount']
 
-async def handle_client(websocket, path):
-    print(f"[INFO] Nowe połączenie WebSocket")
+async def handle_client(websocket):
+    print("[INFO] Nowe połączenie WebSocket")
     connected_clients.add(websocket)
     try:
-        # Wyślij aktualny blockchain do nowego klienta
-        print("[INFO] Wysyłanie blockchaina do nowego klienta")
-        await websocket.send(json.dumps({
-            'type': 'chain',
-            'data': [b.to_dict() for b in blockchain.chain]
-        }))
-        
         async for message in websocket:
             try:
                 print("[INFO] Otrzymano wiadomość od klienta")
                 payload = json.loads(message)
                 response = None
 
-                if payload['type'] == 'chain':
+                if payload['type'] == 'sync':
+                    response = {'type': 'chain', 'data': [b.to_dict() for b in blockchain.chain]}
+                    await websocket.send(json.dumps(response))
+                    continue
+
+                elif payload['type'] == 'chain':
                     new_chain = [Block.from_dict(b) for b in payload['data']]
-                    # Zawsze aktualizuj i propaguj zmiany
                     blockchain.replace_chain(new_chain)
                     update_balances()
-                    print(f"[INFO] Zaktualizowano łańcuch")
+                    print("[INFO] Zaktualizowano łańcuch")
                     response = {'type': 'chain', 'data': [b.to_dict() for b in blockchain.chain]}
 
                 elif payload['type'] == 'transaction':
                     tx = Transaction.from_dict(payload['data'])
                     blockchain.add_transaction(tx)
-                    print(f"[INFO] Dodano transakcję")
-                    response = {'type': 'chain', 'data': [b.to_dict() for b in blockchain.chain]}
+                    print("[INFO] Dodano transakcję")
+                    response = {'type': 'pending_transactions', 'data': [tx.to_dict() for tx in blockchain.pending_transactions]}
+                    print(blockchain.pending_transactions, tx)
 
                 if response:
                     print("[INFO] Wysyłanie odpowiedzi do klientów")
@@ -102,7 +100,7 @@ async def handle_client(websocket, path):
                     print(f"[INFO] Aktywni klienci: {len(connected_clients)}")
 
             except json.JSONDecodeError:
-                print(f"[ERROR] Nieprawidłowy format JSON")
+                print("[ERROR] Nieprawidłowy format JSON")
                 continue
             except Exception as e:
                 print(f"[ERROR] Błąd przetwarzania danych: {e}")
@@ -117,7 +115,6 @@ async def handle_client(websocket, path):
         print(f"[INFO] Usunięto klienta. Pozostało klientów: {len(connected_clients)}")
 
 async def start_server():
-    # Inicjalizuj blockchain przy starcie serwera
     initialize_blockchain()
     
     server = await websockets.serve(

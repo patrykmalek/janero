@@ -1,12 +1,11 @@
 import hashlib
 import json
-import time
-import rsa
 import asyncio
 import websockets
 import sys
 from blockchain import Blockchain, Transaction, Block
 import aioconsole
+from coincurve import PrivateKey
 
 # Inicjalizacja Blockchain
 blockchain = None  # Nie inicjalizujemy blockchaina na starcie
@@ -14,6 +13,8 @@ SERVER_HOST = 'localhost'  # Zmień na IP serwera jeśli łączysz się zdalnie
 SERVER_PORT = 5000
 websocket = None
 connection_lock = asyncio.Lock()
+
+wallets = {}
 
 def update_balances():
     """Aktualizuje balanse na podstawie łańcucha bloków"""
@@ -69,9 +70,7 @@ async def sync_with_server():
         
         try:
             print("[INFO] Wysyłanie żądania synchronizacji...")
-            # Wyślij pustą listę jeśli blockchain nie istnieje
-            chain_data = [b.to_dict() for b in blockchain.chain] if blockchain else []
-            await websocket.send(json.dumps({'type': 'chain', 'data': chain_data}))
+            await websocket.send(json.dumps({'type': 'sync'}))
             print("[INFO] Oczekiwanie na odpowiedź...")
             response = await websocket.recv()
             print("[INFO] Otrzymano odpowiedź od serwera")
@@ -111,45 +110,32 @@ async def send_to_server(payload):
             print(f"[ERROR] Błąd wysyłania danych do serwera: {e}")
             return False
 
-async def keep_alive():
-    global websocket
-    while True:
-        try:
-            async with connection_lock:
-                if websocket:
-                    try:
-                        pong_waiter = await websocket.ping()
-                        await asyncio.wait_for(pong_waiter, timeout=5)
-                        print("[DEBUG] Wysłano ping do serwera")
-                    except asyncio.TimeoutError:
-                        print("[ERROR] Timeout podczas pinga")
-                        websocket = None
-                    except Exception as e:
-                        print(f"[ERROR] Błąd podczas pinga: {e}")
-                        websocket = None
-            await asyncio.sleep(20)  # Ping co 20 sekund
-        except Exception as e:
-            print(f"[ERROR] Błąd w keep_alive: {e}")
-            websocket = None
-            await asyncio.sleep(5)  # Poczekaj przed ponowną próbą
-
 def create_wallet():
     try:
-        public_key, private_key = rsa.newkeys(512)
-        pub_pem = public_key.save_pkcs1().decode()
-        priv_pem = private_key.save_pkcs1().decode()
-        address = hashlib.sha256(pub_pem.encode()).hexdigest()
-        blockchain.public_keys[address] = pub_pem
-        return address, priv_pem
+        # Generuj losowy klucz prywatny
+        private_key = PrivateKey()
+        # Pobierz klucz publiczny
+        public_key = private_key.public_key
+        # Wygeneruj adres (hash z klucza publicznego)
+        address = hashlib.sha256(public_key.format()).hexdigest()
+        # Zapisz tylko klucz prywatny
+        wallets[address] = private_key.to_hex()
+        return address, private_key.to_hex()
     except Exception as e:
         print(f"[ERROR] Błąd tworzenia portfela: {e}")
         return None, None
 
-def sign_transaction(sender_priv_str, sender_addr, recipient, amount):
+def sign_transaction(sender_priv_hex, sender_addr, recipient, amount):
     try:
-        private_key = rsa.PrivateKey.load_pkcs1(sender_priv_str.encode())
+        # Konwertuj klucz prywatny z hex na PrivateKey
+        private_key = PrivateKey.from_hex(sender_priv_hex)
+        # Przygotuj wiadomość do podpisania
         message = f"{sender_addr}{recipient}{amount}".encode()
-        signature = rsa.sign(message, private_key, 'SHA-1').hex()
+        # Zahashuj wiadomość do 32 bajtów
+        message_hash = hashlib.sha256(message).digest()
+        print(f"Message hash: {message_hash.hex()}, length: {len(message_hash)}")
+        # Podpisz zahashowaną wiadomość
+        signature = private_key.sign_recoverable(message_hash, hasher=None).hex()
         return signature
     except Exception as e:
         print(f"[ERROR] Błąd podpisywania transakcji: {e}")
@@ -167,7 +153,6 @@ async def listen_for_updates():
 
             try:
                 message = await websocket.recv()  # NIE blokujemy locka w tym miejscu
-                print("[INFO] Otrzymano wiadomość od serwera")
                 payload = json.loads(message)
 
                 if payload['type'] == 'chain':
@@ -178,6 +163,12 @@ async def listen_for_updates():
                         blockchain.replace_chain(new_chain)
                         update_balances()
                         print("[INFO] Zaktualizowano blockchain z serwera")
+                elif payload['type'] == 'pending_transactions':
+                    async with connection_lock:
+                        if not blockchain:
+                            blockchain = Blockchain()
+                        blockchain.pending_transactions = [Transaction.from_dict(tx) for tx in payload['data']]
+                        print("[INFO] Zaktualizowano oczekujące transakcje")
             except websockets.exceptions.ConnectionClosed:
                 print("[ERROR] Połączenie zostało zamknięte podczas nasłuchiwania")
                 async with connection_lock:
@@ -195,8 +186,6 @@ async def menu():
         print("[ERROR] Nie można połączyć z serwerem. Sprawdź czy serwer jest uruchomiony.")
         return
     
-    # Uruchom keep_alive i listen_for_updates w tle
-    #asyncio.create_task(keep_alive())
     asyncio.create_task(listen_for_updates())
     
     while True:
@@ -236,8 +225,8 @@ async def menu():
                     print("[ERROR] Kwota musi być większa od 0")
                     continue
                     
-                if sender not in blockchain.public_keys:
-                    print("[ERROR] Brak klucza publicznego nadawcy")
+                if sender not in wallets:
+                    print("[ERROR] Brak klucza prywatnego nadawcy")
                     continue
                 
                 # Sprawdź balans przed transakcją
@@ -245,7 +234,7 @@ async def menu():
                     print("[ERROR] Niewystarczające środki")
                     continue
                     
-                priv = blockchain.public_keys[sender]
+                priv = wallets[sender]
                 signature = sign_transaction(priv, sender, recipient, amount)
                 if signature:
                     tx = Transaction(sender, recipient, amount, signature)
@@ -257,9 +246,6 @@ async def menu():
 
         elif choice == "4":
             miner = await aioconsole.ainput("Adres górnika (adres): ")
-            if miner not in blockchain.public_keys:
-                print("[ERROR] Brak klucza publicznego górnika")
-                continue
                 
             print("[INFO] Rozpoczynam wydobywanie bloku...")
             blockchain.mine_block(miner)

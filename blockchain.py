@@ -1,7 +1,7 @@
 import hashlib
 import json
-import rsa
 import time
+from coincurve import PublicKey
 
 
 # -------------------- STRUKTURY --------------------
@@ -62,7 +62,6 @@ class Blockchain:
         self.chain = []
         self.pending_transactions = []
         self.balances = {}
-        self.public_keys = {}
 
     def create_genesis_block(self):
         genesis_block = Block(0, [], time.time(), "0")
@@ -76,13 +75,20 @@ class Blockchain:
         if transaction.sender == "0":  # System (nagroda)
             return True
         try:
-            pubkey_pem = self.public_keys.get(transaction.sender)
-            if not pubkey_pem:
-                return False
-            pubkey = rsa.PublicKey.load_pkcs1(pubkey_pem.encode())
-            rsa.verify(f"{transaction.sender}{transaction.recipient}{transaction.amount}".encode(), bytes.fromhex(transaction.signature), pubkey)
-            return self.balances.get(transaction.sender, 0) >= transaction.amount
+            # Przygotuj wiadomość do weryfikacji
+            message = f"{transaction.sender}{transaction.recipient}{transaction.amount}".encode()
+            # Zahashuj wiadomość do 32 bajtów
+            message_hash = hashlib.sha256(message).digest()
+            # Konwertuj podpis z hex na bytes
+            signature_bytes = bytes.fromhex(transaction.signature)
+            # Odzyskaj klucz publiczny z podpisu i wiadomości
+            recovered_pubkey = PublicKey.from_signature_and_message(signature_bytes, message_hash, hasher=None)
+            # Sprawdź czy odzyskany adres (hash z klucza publicznego) zgadza się z nadawcą
+            recovered_address = hashlib.sha256(recovered_pubkey.format()).hexdigest()
+            is_valid = recovered_address == transaction.sender
+            return is_valid and self.balances.get(transaction.sender, 0) >= transaction.amount
         except Exception as e:
+            print(f"[ERROR] Błąd weryfikacji transakcji: {e}")
             return False
 
     def mine_block(self, miner_address):
