@@ -75,15 +75,10 @@ class Blockchain:
         if transaction.sender == "0":  # System (nagroda)
             return True
         try:
-            # Przygotuj wiadomość do weryfikacji
             message = f"{transaction.sender}{transaction.recipient}{transaction.amount}".encode()
-            # Zahashuj wiadomość do 32 bajtów
             message_hash = hashlib.sha256(message).digest()
-            # Konwertuj podpis z hex na bytes
             signature_bytes = bytes.fromhex(transaction.signature)
-            # Odzyskaj klucz publiczny z podpisu i wiadomości
             recovered_pubkey = PublicKey.from_signature_and_message(signature_bytes, message_hash, hasher=None)
-            # Sprawdź czy odzyskany adres (hash z klucza publicznego) zgadza się z nadawcą
             recovered_address = hashlib.sha256(recovered_pubkey.format()).hexdigest()
             is_valid = recovered_address == transaction.sender
             return is_valid and self.balances.get(transaction.sender, 0) >= transaction.amount

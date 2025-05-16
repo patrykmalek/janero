@@ -6,7 +6,6 @@ import signal
 import sys
 from blockchain import Blockchain, Transaction, Block
 
-# Inicjalizacja Blockchain
 blockchain = Blockchain()
 running = True
 connected_clients = set()
@@ -14,7 +13,6 @@ connected_clients = set()
 def initialize_blockchain():
     """Inicjalizuje blockchain z blokiem genesis"""
     if len(blockchain.chain) == 0:
-        # Tworzenie bloku genesis
         genesis_block = Block(
             index=0,
             timestamp=time.time(),
@@ -29,12 +27,10 @@ def initialize_blockchain():
 
 def update_balances():
     """Aktualizuje balanse na podstawie łańcucha bloków"""
-    blockchain.balances.clear()  # Wyczyść stare balanse
+    blockchain.balances.clear()
     
-    # Przejrzyj wszystkie bloki i transakcje
     for block in blockchain.chain:
         for tx in block.transactions:
-            # Konwertuj transakcję na słownik jeśli to obiekt
             if isinstance(tx, Transaction):
                 tx_data = tx.to_dict()
             else:
@@ -95,7 +91,6 @@ async def handle_client(websocket):
                             print(f"[ERROR] Błąd wysyłania do klienta: {e}")
                             websockets_to_remove.add(client)
                     
-                    # Usuń rozłączonych klientów
                     connected_clients.difference_update(websockets_to_remove)
                     print(f"[INFO] Aktywni klienci: {len(connected_clients)}")
 
@@ -121,9 +116,9 @@ async def start_server():
         handle_client,
         '0.0.0.0',
         5000,
-        ping_interval=20,  # Ping co 20 sekund
-        ping_timeout=10,   # Timeout po 10 sekundach
-        close_timeout=None   # Timeout zamknięcia po 10 sekundach
+        ping_interval=20,
+        ping_timeout=10,
+        close_timeout=None
     )
     print("[INFO] Serwer WebSocket nasłuchuje na porcie 5000...")
     print("[INFO] Dostępny pod adresem: ws://0.0.0.0:5000")

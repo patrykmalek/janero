@@ -7,9 +7,8 @@ from blockchain import Blockchain, Transaction, Block
 import aioconsole
 from coincurve import PrivateKey
 
-# Inicjalizacja Blockchain
-blockchain = None  # Nie inicjalizujemy blockchaina na starcie
-SERVER_HOST = 'localhost'  # Zmień na IP serwera jeśli łączysz się zdalnie
+blockchain = None 
+SERVER_HOST = 'localhost'
 SERVER_PORT = 5000
 websocket = None
 connection_lock = asyncio.Lock()
@@ -18,14 +17,12 @@ wallets = {}
 
 def update_balances():
     """Aktualizuje balanse na podstawie łańcucha bloków"""
-    if not blockchain:  # Nie aktualizujemy jeśli nie ma blockchaina
+    if not blockchain:  
         return
-    blockchain.balances.clear()  # Wyczyść stare balanse
+    blockchain.balances.clear()
     
-    # Przejrzyj wszystkie bloki i transakcje
     for block in blockchain.chain:
         for tx in block.transactions:
-            # Konwertuj transakcję na słownik jeśli to obiekt
             if isinstance(tx, Transaction):
                 tx_data = tx.to_dict()
             else:
@@ -76,11 +73,11 @@ async def sync_with_server():
             print("[INFO] Otrzymano odpowiedź od serwera")
             payload = json.loads(response)
             if payload['type'] == 'chain':
-                if not blockchain:  # Tworzymy blockchain tylko jeśli go nie ma
+                if not blockchain: 
                     blockchain = Blockchain()
                 new_chain = [Block.from_dict(b) for b in payload['data']]
                 blockchain.replace_chain(new_chain)
-                update_balances()  # Aktualizuj balanse po synchronizacji
+                update_balances()
                 print("[INFO] Zsynchronizowano z serwerem")
                 return True
         except websockets.exceptions.ConnectionClosed:
@@ -112,13 +109,9 @@ async def send_to_server(payload):
 
 def create_wallet():
     try:
-        # Generuj losowy klucz prywatny
         private_key = PrivateKey()
-        # Pobierz klucz publiczny
         public_key = private_key.public_key
-        # Wygeneruj adres (hash z klucza publicznego)
         address = hashlib.sha256(public_key.format()).hexdigest()
-        # Zapisz tylko klucz prywatny
         wallets[address] = private_key.to_hex()
         return address, private_key.to_hex()
     except Exception as e:
@@ -127,14 +120,10 @@ def create_wallet():
 
 def sign_transaction(sender_priv_hex, sender_addr, recipient, amount):
     try:
-        # Konwertuj klucz prywatny z hex na PrivateKey
         private_key = PrivateKey.from_hex(sender_priv_hex)
-        # Przygotuj wiadomość do podpisania
         message = f"{sender_addr}{recipient}{amount}".encode()
-        # Zahashuj wiadomość do 32 bajtów
         message_hash = hashlib.sha256(message).digest()
         print(f"Message hash: {message_hash.hex()}, length: {len(message_hash)}")
-        # Podpisz zahashowaną wiadomość
         signature = private_key.sign_recoverable(message_hash, hasher=None).hex()
         return signature
     except Exception as e:
@@ -152,11 +141,11 @@ async def listen_for_updates():
                         continue
 
             try:
-                message = await websocket.recv()  # NIE blokujemy locka w tym miejscu
+                message = await websocket.recv() 
                 payload = json.loads(message)
 
                 if payload['type'] == 'chain':
-                    async with connection_lock:  # tylko operacje na blockchain
+                    async with connection_lock:
                         if not blockchain:
                             blockchain = Blockchain()
                         new_chain = [Block.from_dict(b) for b in payload['data']]
@@ -229,7 +218,6 @@ async def menu():
                     print("[ERROR] Brak klucza prywatnego nadawcy")
                     continue
                 
-                # Sprawdź balans przed transakcją
                 if blockchain.balances.get(sender, 0) < amount:
                     print("[ERROR] Niewystarczające środki")
                     continue
